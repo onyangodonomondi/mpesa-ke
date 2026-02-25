@@ -1,6 +1,6 @@
 {
     "name": "mpesa-ke",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "🇰🇪 The simplest M-Pesa SDK for JavaScript & TypeScript. STK Push, C2B, B2C, and more — zero dependencies.",
     "main": "./dist/index.cjs",
     "module": "./dist/index.js",
