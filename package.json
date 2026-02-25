@@ -1,0 +1,88 @@
+{
+    "name": "mpesa-ke",
+    "version": "1.0.0",
+    "description": "🇰🇪 The simplest M-Pesa SDK for JavaScript & TypeScript. STK Push, C2B, B2C, and more — zero dependencies.",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.js"
+            },
+            "require": {
+                "types": "./dist/index.d.cts",
+                "default": "./dist/index.cjs"
+            }
+        },
+        "./express": {
+            "import": {
+                "types": "./dist/express.d.ts",
+                "default": "./dist/express.js"
+            },
+            "require": {
+                "types": "./dist/express.d.cts",
+                "default": "./dist/express.cjs"
+            }
+        },
+        "./nextjs": {
+            "import": {
+                "types": "./dist/nextjs.d.ts",
+                "default": "./dist/nextjs.js"
+            },
+            "require": {
+                "types": "./dist/nextjs.d.cts",
+                "default": "./dist/nextjs.cjs"
+            }
+        }
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "typecheck": "tsc --noEmit",
+        "lint": "eslint src/",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "mpesa",
+        "m-pesa",
+        "daraja",
+        "safaricom",
+        "stk-push",
+        "lipa-na-mpesa",
+        "kenya",
+        "payments",
+        "mobile-money",
+        "c2b",
+        "b2c",
+        "fintech",
+        "africa"
+    ],
+    "author": "Onyango Don Omondi <onyangodonomondi@gmail.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/onyangodonomondi/mpesa-ke.git"
+    },
+    "bugs": {
+        "url": "https://github.com/onyangodonomondi/mpesa-ke/issues"
+    },
+    "homepage": "https://github.com/onyangodonomondi/mpesa-ke#readme",
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "devDependencies": {
+        "tsup": "^8.0.0",
+        "typescript": "^5.3.0",
+        "vitest": "^1.0.0",
+        "@types/node": "^20.0.0"
+    }
+}
