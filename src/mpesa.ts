@@ -20,8 +20,16 @@ import type {
     TransactionStatusResponse,
     ReversalRequest,
     ReversalResponse,
+    B2BRequest,
+    B2BResponse,
+    DynamicQRRequest,
+    DynamicQRResponse,
+    C2BSimulateRequest,
+    C2BSimulateResponse,
+    TaxRemittanceRequest,
+    TaxRemittanceResponse,
 } from './types.js';
-import { formatPhoneNumber, generateTimestamp, generatePassword } from './utils.js';
+import { formatPhoneNumber, generateTimestamp, generatePassword, generateSecurityCredential } from './utils.js';
 import { MpesaAuthError, MpesaApiError, MpesaValidationError } from './errors.js';
 
 const URLS = {
@@ -63,6 +71,8 @@ export class Mpesa {
     private readonly config: MpesaConfig;
     private readonly urls: { readonly auth: string; readonly api: string };
     private readonly timeout: number;
+    private readonly debug: boolean;
+    private readonly maxRetries: number;
 
     // Token cache
     private accessToken: string | null = null;
@@ -79,6 +89,8 @@ export class Mpesa {
         this.config = config;
         this.urls = URLS[config.environment || 'sandbox'];
         this.timeout = config.timeout || 30000;
+        this.debug = config.debug || false;
+        this.maxRetries = config.retries || 0;
     }
 
     // ─── Auth ────────────────────────────────────────────────
@@ -119,6 +131,29 @@ export class Mpesa {
         this.tokenExpiry = Date.now() + (parseInt(data.expires_in) * 1000) - 60000;
 
         return this.accessToken;
+    }
+
+    /**
+     * Get the security credential for B2C/B2B/Balance/Status operations.
+     * If initiatorPassword is set, encrypts it with the Safaricom cert.
+     * Falls back to the request-level credential or businessShortCode.
+     */
+    private getSecurityCredential(requestCredential?: string): string {
+        if (requestCredential) return requestCredential;
+
+        if (this.config.initiatorPassword) {
+            return generateSecurityCredential(
+                this.config.initiatorPassword,
+                this.config.certificatePath
+            );
+        }
+
+        return this.config.businessShortCode;
+    }
+
+    /** Get the initiator name from config or fall back to businessShortCode */
+    private getInitiatorName(requestInitiator?: string): string {
+        return requestInitiator || this.config.initiatorName || this.config.businessShortCode;
     }
 
     // ─── STK Push ────────────────────────────────────────────
@@ -235,6 +270,45 @@ export class Mpesa {
         );
     }
 
+    /**
+     * Simulate a C2B payment (sandbox only).
+     * Useful for testing your C2B callback handlers without real money.
+     *
+     * @example
+     * ```ts
+     * await mpesa.c2bSimulate({
+     *   amount: 100,
+     *   phoneNumber: '254712345678',
+     *   billRefNumber: 'Test001',
+     * });
+     * ```
+     */
+    async c2bSimulate(request: C2BSimulateRequest): Promise<C2BSimulateResponse> {
+        if (this.config.environment === 'production') {
+            throw new MpesaValidationError(
+                'C2B Simulate is only available in sandbox environment',
+                'environment'
+            );
+        }
+
+        const token = await this.getAccessToken();
+        const phone = formatPhoneNumber(request.phoneNumber);
+
+        const body = {
+            ShortCode: this.config.businessShortCode,
+            CommandID: request.commandId || 'CustomerPayBillOnline',
+            Amount: Math.round(request.amount),
+            Msisdn: phone,
+            BillRefNumber: request.billRefNumber,
+        };
+
+        return this.apiRequest<C2BSimulateResponse>(
+            '/mpesa/c2b/v1/simulate',
+            body,
+            token
+        );
+    }
+
     // ─── B2C ─────────────────────────────────────────────────
 
     /**
@@ -255,8 +329,8 @@ export class Mpesa {
         const phone = formatPhoneNumber(request.phoneNumber);
 
         const body = {
-            InitiatorName: request.initiatorName || this.config.businessShortCode,
-            SecurityCredential: request.securityCredential || this.config.businessShortCode,
+            InitiatorName: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
             CommandID: request.commandId || 'BusinessPayment',
             Amount: Math.round(request.amount),
             PartyA: this.config.businessShortCode,
@@ -269,6 +343,47 @@ export class Mpesa {
 
         return this.apiRequest<B2CResponse>(
             '/mpesa/b2c/v1/paymentrequest',
+            body,
+            token
+        );
+    }
+
+    // ─── B2B ─────────────────────────────────────────────────
+
+    /**
+     * Send money from your business to another business (B2B).
+     *
+     * @example
+     * ```ts
+     * const result = await mpesa.b2bPayment({
+     *   receiverShortCode: '600000',
+     *   amount: 1000,
+     *   commandId: 'BusinessPayBill',
+     *   accountReference: 'INV001',
+     *   remarks: 'Payment for services',
+     * });
+     * ```
+     */
+    async b2bPayment(request: B2BRequest): Promise<B2BResponse> {
+        const token = await this.getAccessToken();
+
+        const body = {
+            Initiator: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
+            CommandID: request.commandId || 'BusinessPayBill',
+            SenderIdentifierType: '4',
+            RecieverIdentifierType: request.receiverIdentifierType || '4',
+            Amount: Math.round(request.amount),
+            PartyA: this.config.businessShortCode,
+            PartyB: request.receiverShortCode,
+            AccountReference: request.accountReference || '',
+            Remarks: request.remarks || 'B2B Payment',
+            QueueTimeOutURL: request.queueTimeoutUrl || this.config.callbackUrl,
+            ResultURL: request.resultUrl || this.config.callbackUrl,
+        };
+
+        return this.apiRequest<B2BResponse>(
+            '/mpesa/b2b/v1/paymentrequest',
             body,
             token
         );
@@ -288,8 +403,8 @@ export class Mpesa {
         const token = await this.getAccessToken();
 
         const body = {
-            Initiator: request.initiatorName || this.config.businessShortCode,
-            SecurityCredential: request.securityCredential || this.config.businessShortCode,
+            Initiator: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
             CommandID: 'AccountBalance',
             PartyA: this.config.businessShortCode,
             IdentifierType: '4',
@@ -321,8 +436,8 @@ export class Mpesa {
         const token = await this.getAccessToken();
 
         const body = {
-            Initiator: request.initiatorName || this.config.businessShortCode,
-            SecurityCredential: request.securityCredential || this.config.businessShortCode,
+            Initiator: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
             CommandID: 'TransactionStatusQuery',
             TransactionID: request.transactionId,
             PartyA: this.config.businessShortCode,
@@ -358,8 +473,8 @@ export class Mpesa {
         const token = await this.getAccessToken();
 
         const body = {
-            Initiator: request.initiatorName || this.config.businessShortCode,
-            SecurityCredential: request.securityCredential || this.config.businessShortCode,
+            Initiator: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
             CommandID: 'TransactionReversal',
             TransactionID: request.transactionId,
             Amount: Math.round(request.amount),
@@ -378,10 +493,93 @@ export class Mpesa {
         );
     }
 
-    // ─── Internal Helpers ────────────────────────────────────
+    // ─── Dynamic QR Code ─────────────────────────────────────
 
     /**
-     * Make an authenticated API request to Safaricom.
+     * Generate a dynamic M-Pesa QR code for payment.
+     *
+     * @example
+     * ```ts
+     * const result = await mpesa.dynamicQR({
+     *   merchantName: 'My Shop',
+     *   refNo: 'Order123',
+     *   amount: 500,
+     *   transactionType: 'BG', // Buy Goods
+     *   creditPartyIdentifier: '174379',
+     * });
+     * console.log(result.QRCode); // Base64-encoded QR image
+     * ```
+     */
+    async dynamicQR(request: DynamicQRRequest): Promise<DynamicQRResponse> {
+        const token = await this.getAccessToken();
+
+        const body = {
+            MerchantName: request.merchantName,
+            RefNo: request.refNo,
+            Amount: Math.round(request.amount),
+            TrxCode: request.transactionType,
+            CPI: request.creditPartyIdentifier,
+            Size: '300',
+        };
+
+        return this.apiRequest<DynamicQRResponse>(
+            '/mpesa/qrcode/v1/generate',
+            body,
+            token
+        );
+    }
+
+    // ─── Tax Remittance ──────────────────────────────────────
+
+    /**
+     * Remit tax to KRA via M-Pesa.
+     *
+     * @example
+     * ```ts
+     * const result = await mpesa.taxRemittance({
+     *   amount: 5000,
+     *   accountReference: 'KRA_PIN_HERE',
+     *   receiverShortCode: '572572',
+     *   remarks: 'Tax remittance',
+     * });
+     * ```
+     */
+    async taxRemittance(request: TaxRemittanceRequest): Promise<TaxRemittanceResponse> {
+        const token = await this.getAccessToken();
+
+        const body = {
+            Initiator: this.getInitiatorName(request.initiatorName),
+            SecurityCredential: this.getSecurityCredential(request.securityCredential),
+            CommandID: 'PayTaxToKRA',
+            SenderIdentifierType: '4',
+            RecieverIdentifierType: '4',
+            Amount: Math.round(request.amount),
+            PartyA: this.config.businessShortCode,
+            PartyB: request.receiverShortCode,
+            AccountReference: request.accountReference,
+            Remarks: request.remarks || 'Tax Remittance',
+            QueueTimeOutURL: request.queueTimeoutUrl || this.config.callbackUrl,
+            ResultURL: request.resultUrl || this.config.callbackUrl,
+        };
+
+        return this.apiRequest<TaxRemittanceResponse>(
+            '/mpesa/tax/v1/remittance',
+            body,
+            token
+        );
+    }
+
+    // ─── Internal Helpers ────────────────────────────────────
+
+    /** Debug log helper */
+    private log(message: string, data?: unknown): void {
+        if (this.debug) {
+            console.log(`[mpesa-ke] ${message}`, data !== undefined ? data : '');
+        }
+    }
+
+    /**
+     * Make an authenticated API request to Safaricom with retry support.
      */
     private async apiRequest<T>(
         path: string,
@@ -389,33 +587,70 @@ export class Mpesa {
         token: string
     ): Promise<T> {
         const url = `${this.urls.api}${path}`;
+        let lastError: Error | null = null;
 
-        const response = await this.fetchWithTimeout(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(body),
-        });
+        for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+            try {
+                if (attempt > 0) {
+                    // Exponential backoff: 1s, 2s, 4s, 8s...
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+                    this.log(`Retry attempt ${attempt}/${this.maxRetries} after ${delay}ms`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
 
-        const data = await response.json().catch(() => ({}));
+                this.log(`${path}`, { method: 'POST', body });
 
-        if (!response.ok) {
-            const errorMessage =
-                (data as Record<string, string>).errorMessage ||
-                (data as Record<string, string>).ResultDesc ||
-                `API request failed: ${response.status} ${response.statusText}`;
+                const response = await this.fetchWithTimeout(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(body),
+                });
 
-            throw new MpesaApiError(
-                errorMessage,
-                response.status,
-                data,
-                (data as Record<string, string>).errorCode
-            );
+                const data = await response.json().catch(() => ({}));
+
+                this.log(`Response ${response.status}`, data);
+
+                if (!response.ok) {
+                    const errorMessage =
+                        (data as Record<string, string>).errorMessage ||
+                        (data as Record<string, string>).ResultDesc ||
+                        `API request failed: ${response.status} ${response.statusText}`;
+
+                    const error = new MpesaApiError(
+                        errorMessage,
+                        response.status,
+                        data,
+                        (data as Record<string, string>).errorCode
+                    );
+
+                    // Only retry on 5xx server errors or network issues
+                    if (response.status >= 500 && attempt < this.maxRetries) {
+                        lastError = error;
+                        continue;
+                    }
+
+                    throw error;
+                }
+
+                return data as T;
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+
+                // Don't retry on client errors (4xx) or validation errors
+                if (error instanceof MpesaApiError && error.statusCode && error.statusCode < 500) {
+                    throw error;
+                }
+
+                if (attempt >= this.maxRetries) {
+                    throw lastError;
+                }
+            }
         }
 
-        return data as T;
+        throw lastError || new MpesaApiError('Request failed after all retries');
     }
 
     /**
@@ -457,6 +692,9 @@ export class Mpesa {
  * - `MPESA_PASSKEY`
  * - `MPESA_ENVIRONMENT` (optional, defaults to 'sandbox')
  * - `MPESA_CALLBACK_URL`
+ * - `MPESA_INITIATOR_NAME` (optional)
+ * - `MPESA_INITIATOR_PASSWORD` (optional)
+ * - `MPESA_CERTIFICATE_PATH` (optional)
  *
  * @example
  * ```ts
@@ -474,6 +712,11 @@ export function createMpesa(): Mpesa {
         passKey: (env.MPESA_PASSKEY || '').trim(),
         environment: (env.MPESA_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
         callbackUrl: (env.MPESA_CALLBACK_URL || '').trim(),
+        initiatorName: env.MPESA_INITIATOR_NAME?.trim(),
+        initiatorPassword: env.MPESA_INITIATOR_PASSWORD?.trim(),
+        certificatePath: env.MPESA_CERTIFICATE_PATH?.trim(),
+        debug: env.MPESA_DEBUG === 'true',
+        retries: parseInt(env.MPESA_RETRIES || '0') || 0,
     };
 
     return new Mpesa(config);

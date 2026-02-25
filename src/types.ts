@@ -19,6 +19,16 @@ export interface MpesaConfig {
     callbackUrl: string;
     /** Request timeout in milliseconds (default: 30000) */
     timeout?: number;
+    /** Initiator name for B2C/B2B/Balance/Status operations */
+    initiatorName?: string;
+    /** Initiator password (will be encrypted with Safaricom cert) */
+    initiatorPassword?: string;
+    /** Path to Safaricom public certificate for credential encryption */
+    certificatePath?: string;
+    /** Enable debug logging of all API requests and responses */
+    debug?: boolean;
+    /** Number of retry attempts on transient failures (default: 0) */
+    retries?: number;
 }
 
 // ─── Auth ────────────────────────────────────────────────────
@@ -176,6 +186,107 @@ export interface ReversalRequest {
 }
 
 export interface ReversalResponse {
+    OriginatorConversationID: string;
+    ConversationID: string;
+    ResponseCode: string;
+    ResponseDescription: string;
+}
+
+// ─── B2B (Business to Business) ─────────────────────────────
+
+export interface B2BRequest {
+    /** Recipient business short code */
+    receiverShortCode: string;
+    /** Amount to transfer */
+    amount: number;
+    /** Type of B2B command */
+    commandId?: 'BusinessPayBill' | 'MerchantToMerchantTransfer' | 'MerchantTransferFromMerchantToWorking' | 'MerchantServicesMMFAccountTransfer' | 'AgencyFloatAdvance';
+    /** Account reference for the receiver */
+    accountReference?: string;
+    /** Description / remarks */
+    remarks?: string;
+    /** Initiator name */
+    initiatorName?: string;
+    /** Encrypted security credential */
+    securityCredential?: string;
+    /** Receiver identifier type (4 = shortcode) */
+    receiverIdentifierType?: string;
+    /** Override result URL */
+    resultUrl?: string;
+    /** Override timeout URL */
+    queueTimeoutUrl?: string;
+}
+
+export interface B2BResponse {
+    OriginatorConversationID: string;
+    ConversationID: string;
+    ResponseCode: string;
+    ResponseDescription: string;
+}
+
+// ─── Dynamic QR Code ────────────────────────────────────────
+
+export interface DynamicQRRequest {
+    /** Name of the merchant */
+    merchantName: string;
+    /** Reference number for the transaction */
+    refNo: string;
+    /** Amount (KES) */
+    amount: number;
+    /** Transaction type: BG (Buy Goods), WA (Withdraw Cash), PB (Pay Bill), SM (Send Money), SB (Sent to Business) */
+    transactionType: 'BG' | 'WA' | 'PB' | 'SM' | 'SB';
+    /** Credit party identifier (Till/Paybill/Phone) */
+    creditPartyIdentifier: string;
+}
+
+export interface DynamicQRResponse {
+    ResponseCode: string;
+    RequestID: string;
+    ResponseDescription: string;
+    QRCode: string;
+}
+
+// ─── C2B Simulate (Sandbox Only) ────────────────────────────
+
+export interface C2BSimulateRequest {
+    /** Amount to simulate */
+    amount: number;
+    /** Customer phone number */
+    phoneNumber: string;
+    /** Bill reference number */
+    billRefNumber: string;
+    /** Command ID */
+    commandId?: 'CustomerPayBillOnline' | 'CustomerBuyGoodsOnline';
+}
+
+export interface C2BSimulateResponse {
+    OriginatorConversationID: string;
+    ConversationID: string;
+    ResponseDescription: string;
+}
+
+// ─── Tax Remittance ─────────────────────────────────────────
+
+export interface TaxRemittanceRequest {
+    /** Amount to remit */
+    amount: number;
+    /** KRA PIN or account identifier */
+    accountReference: string;
+    /** Receiver short code (KRA paybill) */
+    receiverShortCode: string;
+    /** Description / remarks */
+    remarks?: string;
+    /** Initiator name */
+    initiatorName?: string;
+    /** Encrypted security credential */
+    securityCredential?: string;
+    /** Override result URL */
+    resultUrl?: string;
+    /** Override timeout URL */
+    queueTimeoutUrl?: string;
+}
+
+export interface TaxRemittanceResponse {
     OriginatorConversationID: string;
     ConversationID: string;
     ResponseCode: string;

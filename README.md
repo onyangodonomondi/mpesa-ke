@@ -20,8 +20,10 @@ STK Push, C2B, B2C, and more — zero dependencies, works everywhere.
 |---|---|---|
 | **Zero dependencies** | ✅ Native `fetch()` | ❌ Axios, request, etc. |
 | **TypeScript first** | ✅ Full types | ⚠️ Partial or none |
-| **All Daraja APIs** | ✅ STK, C2B, B2C, Balance, Status, Reversal | ⚠️ Usually STK only |
+| **All Daraja APIs** | ✅ STK, C2B, B2C, B2B, QR, Tax, Balance, Status, Reversal | ⚠️ Usually STK only |
 | **Framework helpers** | ✅ Next.js & Express | ❌ DIY |
+| **Retry & Debug** | ✅ Built-in retry + debug logging | ❌ DIY |
+| **Security Credentials** | ✅ Auto-encrypts with Safaricom cert | ❌ Manual OpenSSL |
 | **5-minute setup** | ✅ Install → configure → done | ❌ Hours of setup |
 
 ## Quick Start
@@ -78,6 +80,11 @@ const mpesa = createMpesa();
 | `environment` | `'sandbox' \| 'production'` | ✅ | API environment |
 | `callbackUrl` | `string` | ✅ | Default URL for async results |
 | `timeout` | `number` | ❌ | Request timeout in ms (default: 30000) |
+| `initiatorName` | `string` | ❌ | Initiator name for B2C/B2B operations |
+| `initiatorPassword` | `string` | ❌ | Initiator password (auto-encrypted) |
+| `certificatePath` | `string` | ❌ | Path to Safaricom production cert |
+| `debug` | `boolean` | ❌ | Log all API requests (default: false) |
+| `retries` | `number` | ❌ | Retry on 5xx errors (default: 0) |
 
 ---
 
@@ -167,6 +174,89 @@ await mpesa.reversal({
   transactionId: 'OEI2AK4Q16',
   amount: 100,
   remarks: 'Wrong transaction',
+});
+```
+
+---
+
+### `mpesa.b2bPayment(request)` — Business to Business
+
+```typescript
+await mpesa.b2bPayment({
+  receiverShortCode: '600000',
+  amount: 1000,
+  commandId: 'BusinessPayBill',
+  accountReference: 'INV001',
+  remarks: 'Payment for services',
+});
+```
+
+---
+
+### `mpesa.dynamicQR(request)` — Generate QR Code
+
+```typescript
+const result = await mpesa.dynamicQR({
+  merchantName: 'My Shop',
+  refNo: 'Order123',
+  amount: 500,
+  transactionType: 'BG', // Buy Goods
+  creditPartyIdentifier: '174379',
+});
+console.log(result.QRCode); // Base64-encoded QR image
+```
+
+---
+
+### `mpesa.c2bSimulate(request)` — Simulate C2B (Sandbox)
+
+Test your C2B callbacks without real money:
+
+```typescript
+await mpesa.c2bSimulate({
+  amount: 100,
+  phoneNumber: '0712345678',
+  billRefNumber: 'Test001',
+});
+```
+
+---
+
+### `mpesa.taxRemittance(request)` — Tax Payment (KRA)
+
+```typescript
+await mpesa.taxRemittance({
+  amount: 5000,
+  accountReference: 'KRA_PIN',
+  receiverShortCode: '572572',
+  remarks: 'Tax remittance',
+});
+```
+
+## Security Credentials
+
+For B2C, B2B, Account Balance, Transaction Status, and Reversal APIs, Safaricom requires an encrypted security credential. mpesa-ke handles this automatically:
+
+```typescript
+const mpesa = new Mpesa({
+  // ... other config
+  initiatorName: 'testapi',
+  initiatorPassword: 'your_password',
+  // For production, provide the cert path:
+  // certificatePath: './certs/production.cer',
+});
+
+// Now B2C/B2B calls auto-encrypt the credential:
+await mpesa.b2cPayment({ phoneNumber: '0712345678', amount: 500 });
+```
+
+## Retry & Debug Mode
+
+```typescript
+const mpesa = new Mpesa({
+  // ... other config
+  retries: 3,    // Retry up to 3 times on 5xx errors (exponential backoff)
+  debug: true,   // Log all API requests and responses
 });
 ```
 
@@ -271,6 +361,11 @@ try {
 | `MPESA_PASSKEY` | STK Push passkey | ✅ |
 | `MPESA_ENVIRONMENT` | `sandbox` or `production` | ❌ (default: `sandbox`) |
 | `MPESA_CALLBACK_URL` | Callback URL for results | ✅ |
+| `MPESA_INITIATOR_NAME` | Initiator for B2C/B2B | ❌ |
+| `MPESA_INITIATOR_PASSWORD` | Auto-encrypted credential | ❌ |
+| `MPESA_CERTIFICATE_PATH` | Path to production cert | ❌ |
+| `MPESA_DEBUG` | Set `true` for debug logs | ❌ |
+| `MPESA_RETRIES` | Retry count (default: 0) | ❌ |
 
 ## Getting Safaricom API Credentials
 
